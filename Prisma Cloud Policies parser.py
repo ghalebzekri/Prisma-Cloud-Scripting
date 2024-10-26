@@ -2,61 +2,58 @@ import os
 import json
 import csv
 import requests
-from bs4 import BeautifulSoup
 
-# Define the URL of the repository
-repo_url = "https://github.com/PaloAltoNetworks/prisma-cloud-policies/tree/master/policies"
-
-# Directory to save JSON files locally
+# URL du dépôt GitHub et répertoire des JSONs
+repo_url = "https://api.github.com/repos/PaloAltoNetworks/prisma-cloud-policies/contents/policies"
 json_dir = "policies"
+output_csv = "prisma_cloud_policies_final.csv"
 
-# Output CSV file
-output_csv = "prisma_cloud_policies.csv"
-
-# Function to download JSON files from GitHub if needed
+# Fonction pour télécharger les fichiers JSON depuis le répertoire 'policies' du dépôt
 def download_json_files():
-    response = requests.get(repo_url)
-    soup = BeautifulSoup(response.text, 'html.parser')
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    response = requests.get(repo_url, headers=headers)
     
-    # Find all JSON file links in the repository
-    json_files = []
-    for link in soup.find_all('a', href=True):
-        if link['href'].endswith('.json'):
-            json_files.append("https://raw.githubusercontent.com" + link['href'].replace('/blob', ''))
+    if response.status_code == 200:
+        json_files = response.json()
+        
+        # Créer le répertoire local s'il n'existe pas
+        if not os.path.exists(json_dir):
+            os.makedirs(json_dir)
 
-    # Ensure JSON directory exists
-    if not os.path.exists(json_dir):
-        os.makedirs(json_dir)
+        # Télécharger chaque fichier JSON dans le répertoire
+        for file_info in json_files:
+            if file_info['name'].endswith('.json'):
+                json_url = file_info['download_url']
+                file_name = os.path.join(json_dir, file_info['name'])
+                
+                if not os.path.exists(file_name):  # Éviter de télécharger les fichiers déjà présents
+                    with requests.get(json_url) as response:
+                        if response.status_code == 200:
+                            with open(file_name, 'w') as file:
+                                file.write(response.text)
+    else:
+        print("Erreur lors de la récupération des fichiers JSON :", response.status_code)
 
-    # Download each JSON file into the policies directory
-    for json_file_url in json_files:
-        file_name = os.path.join(json_dir, os.path.basename(json_file_url))
-        if not os.path.exists(file_name):  # Skip if file already exists
-            with requests.get(json_file_url) as response:
-                if response.status_code == 200:
-                    with open(file_name, 'w') as file:
-                        file.write(response.text)
-
-# Call the function to download JSON files
+# Appeler la fonction pour télécharger les fichiers JSON
 download_json_files()
 
-# Open the CSV file for writing
+# Ouvrir le fichier CSV pour écrire les données extraites
 with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
     fieldnames = ["policyUpi", "policyId", "policyType", "cloudType", "severity", "name", "description", "searchModel.query"]
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
     writer.writeheader()
     
-    # Loop through each JSON file in the policies directory
+    # Parcourir chaque fichier JSON dans le répertoire des policies
     for file_name in os.listdir(json_dir):
         if file_name.endswith(".json"):
             file_path = os.path.join(json_dir, file_name)
             
-            # Open and parse the JSON file
+            # Ouvrir et analyser le fichier JSON
             with open(file_path, 'r', encoding='utf-8') as json_file:
                 try:
                     data = json.load(json_file)
                     
-                    # Extract only the specified fields
+                    # Extraire uniquement les champs spécifiés
                     extracted_data = {
                         "policyUpi": data.get("policyUpi", "Missing"),
                         "policyId": data.get("policyId", "Missing"),
@@ -68,10 +65,10 @@ with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
                         "searchModel.query": data.get("searchModel.query", "Missing"),
                     }
                     
-                    # Write the extracted data to the CSV file
+                    # Écrire les données extraites dans le fichier CSV
                     writer.writerow(extracted_data)
                 
                 except json.JSONDecodeError as e:
-                    print(f"Error decoding JSON from file {file_name}: {e}")
+                    print(f"Erreur de décodage JSON dans le fichier {file_name} : {e}")
 
-print(f"Data has been successfully extracted to {output_csv}")
+print(f"Les données ont été extraites avec succès dans {output_csv}")
